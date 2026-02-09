@@ -23,6 +23,8 @@
 #include "tools/tool_registry.h"
 #include "display/display.h"
 #include "buttons/button_driver.h"
+#include "ui/config_screen.h"
+#include "imu/imu_manager.h"
 #include "rgb/rgb.h"
 
 static const char *TAG = "mimi";
@@ -104,6 +106,9 @@ void app_main(void)
     ESP_ERROR_CHECK(rgb_init());
     rgb_set(255, 0, 0);
     button_Init();
+    config_screen_init();
+    imu_manager_init();
+    imu_manager_set_shake_callback(config_screen_toggle);
 
     /* Phase 1: Core infrastructure */
     ESP_ERROR_CHECK(init_nvs());

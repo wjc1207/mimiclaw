@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include "esp_check.h"
 #include "esp_log.h"
 #include "driver/ledc.h"
@@ -9,6 +10,8 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "display/Vernon_ST7789T/Vernon_ST7789T.h"
+#include "display/font5x7.h"
+#include "qrcode.h"
 
 #define LCD_HOST  SPI3_HOST
 
@@ -47,9 +50,108 @@ static const char *TAG = "display";
 
 static esp_lcd_panel_handle_t panel_handle = NULL;
 static uint8_t backlight_percent = 50;
+static uint16_t *framebuffer = NULL;
+
+typedef struct {
+    int x;
+    int y;
+    int box;
+    uint16_t fg;
+} qr_draw_ctx_t;
+
+static qr_draw_ctx_t s_qr_ctx;
 
 extern const uint8_t _binary_banner_320x172_rgb565_start[];
 extern const uint8_t _binary_banner_320x172_rgb565_end[];
+
+static inline uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
+{
+    return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+static void fb_ensure(void)
+{
+    if (!framebuffer) {
+        framebuffer = (uint16_t *)calloc(BANNER_W * BANNER_H, sizeof(uint16_t));
+    }
+}
+
+static inline void fb_set_pixel(int x, int y, uint16_t color)
+{
+    if (x < 0 || y < 0 || x >= BANNER_W || y >= BANNER_H || !framebuffer) {
+        return;
+    }
+    framebuffer[y * BANNER_W + x] = color;
+}
+
+static void fb_fill_rect(int x, int y, int w, int h, uint16_t color)
+{
+    if (!framebuffer) {
+        return;
+    }
+    for (int yy = y; yy < y + h; yy++) {
+        for (int xx = x; xx < x + w; xx++) {
+            fb_set_pixel(xx, yy, color);
+        }
+    }
+}
+
+static void fb_fill_rect_clipped(int x, int y, int w, int h, uint16_t color, int clip_x0, int clip_x1)
+{
+    if (!framebuffer) {
+        return;
+    }
+    int x0 = x;
+    int x1 = x + w;
+    if (x0 < clip_x0) {
+        x0 = clip_x0;
+    }
+    if (x1 > clip_x1) {
+        x1 = clip_x1;
+    }
+    if (x1 <= x0) {
+        return;
+    }
+    for (int yy = y; yy < y + h; yy++) {
+        for (int xx = x0; xx < x1; xx++) {
+            fb_set_pixel(xx, yy, color);
+        }
+    }
+}
+
+static void fb_draw_char_scaled_clipped(int x, int y, char c, uint16_t color, int scale, int clip_x0, int clip_x1)
+{
+    if (c < 32 || c > 127) {
+        c = '?';
+    }
+    const uint8_t *glyph = font5x7[(uint8_t)c - 32];
+    for (int col = 0; col < FONT5X7_WIDTH; col++) {
+        uint8_t bits = glyph[col];
+        for (int row = 0; row < FONT5X7_HEIGHT; row++) {
+            if (bits & (1 << row)) {
+                int px = x + col * scale;
+                int py = y + row * scale;
+                fb_fill_rect_clipped(px, py, scale, scale, color, clip_x0, clip_x1);
+            }
+        }
+    }
+}
+
+static void fb_draw_text_clipped(int x, int y, const char *text, uint16_t color, int line_height, int scale,
+                                 int clip_x0, int clip_x1)
+{
+    int cx = x;
+    int cy = y;
+    for (size_t i = 0; text[i] != '\0'; i++) {
+        if (text[i] == '\n') {
+            cy += line_height;
+            cx = x;
+            continue;
+        }
+        fb_draw_char_scaled_clipped(cx, cy, text[i], color, scale, clip_x0, clip_x1);
+        cx += (FONT5X7_WIDTH + 1) * scale;
+    }
+}
 
 static void backlight_ledc_init(void)
 {
@@ -167,6 +269,106 @@ void display_show_banner(void)
     }
 
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, BANNER_W, BANNER_H, start));
+}
+
+static void qr_draw_cb(esp_qrcode_handle_t qrcode)
+{
+    int size = esp_qrcode_get_size(qrcode);
+    int quiet = 2;
+    int scale = s_qr_ctx.box / (size + quiet * 2);
+    if (scale < 1) {
+        scale = 1;
+    }
+    int qr_px = (size + quiet * 2) * scale;
+    int origin_x = s_qr_ctx.x + (s_qr_ctx.box - qr_px) / 2 + quiet * scale;
+    int origin_y = s_qr_ctx.y + (s_qr_ctx.box - qr_px) / 2 + quiet * scale;
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            if (esp_qrcode_get_module(qrcode, x, y)) {
+                fb_fill_rect(origin_x + x * scale, origin_y + y * scale, scale, scale, s_qr_ctx.fg);
+            }
+        }
+    }
+}
+
+void display_show_config_screen(const char *qr_text, const char *ip_text,
+                                const char **lines, size_t line_count, size_t scroll,
+                                size_t selected, int selected_offset_px)
+{
+    if (!panel_handle) {
+        ESP_LOGW(TAG, "display not initialized");
+        return;
+    }
+    if (!qr_text || !ip_text || !lines) {
+        return;
+    }
+
+    fb_ensure();
+    if (!framebuffer) {
+        ESP_LOGW(TAG, "framebuffer alloc failed");
+        return;
+    }
+
+    const uint16_t color_bg = rgb565(0, 0, 0);
+    const uint16_t color_fg = rgb565(255, 255, 255);
+    const uint16_t color_qr_bg = rgb565(255, 255, 255);
+    const uint16_t color_qr_fg = rgb565(0, 0, 0);
+    const uint16_t color_title = rgb565(100, 200, 255);
+    const uint16_t color_sel_bg = rgb565(50, 80, 120);
+
+    fb_fill_rect(0, 0, BANNER_W, BANNER_H, color_bg);
+
+    // QR area (left column)
+    const int left_pad = 6;
+    const int qr_box = 110;
+    const int qr_x = left_pad;
+    const int qr_y = (BANNER_H - qr_box) / 2 - 8;
+
+    fb_fill_rect(qr_x, qr_y, qr_box, qr_box, color_qr_bg);
+
+    s_qr_ctx.x = qr_x;
+    s_qr_ctx.y = qr_y;
+    s_qr_ctx.box = qr_box;
+    s_qr_ctx.fg = color_qr_fg;
+
+    esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+    cfg.display_func = qr_draw_cb;
+    cfg.max_qrcode_version = 6;
+    cfg.qrcode_ecc_level = ESP_QRCODE_ECC_MED;
+
+    esp_qrcode_generate(&cfg, qr_text);
+
+    // IP text under QR
+    fb_draw_text_clipped(qr_x, qr_y + qr_box + 4, ip_text, color_fg, 10, 1, 0, BANNER_W);
+
+    // Right column
+    const int right_x = qr_x + qr_box + 10;
+    const int right_w = BANNER_W - right_x - 6;
+    (void)right_w;
+    fb_draw_text_clipped(right_x, 4, "Configuration", color_title, 14, 2, right_x, BANNER_W);
+
+    const int line_height = 16;
+    const int start_y = 24;
+    size_t lines_per_page = (BANNER_H - start_y - 6) / line_height;
+    for (size_t i = 0; i < lines_per_page; i++) {
+        if (line_count == 0) {
+            break;
+        }
+        size_t idx = (scroll + i) % line_count;
+        if (idx < line_count) {
+            int line_y = start_y + (int)i * line_height;
+            if (idx == selected) {
+                fb_fill_rect(right_x, line_y - 1, BANNER_W - right_x - 2, line_height + 2, color_sel_bg);
+                fb_draw_text_clipped(right_x - selected_offset_px, line_y, lines[idx], color_fg, line_height, 2, right_x, BANNER_W);
+            } else {
+                fb_fill_rect(right_x, line_y - 1, BANNER_W - right_x - 2, line_height + 2, color_bg);
+                fb_draw_text_clipped(right_x, line_y, lines[idx], color_fg, line_height, 2, right_x, BANNER_W);
+            }
+        }
+    }
+
+    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, BANNER_W, BANNER_H, framebuffer));
 }
 
 bool display_get_banner_center_rgb(uint8_t *r, uint8_t *g, uint8_t *b)

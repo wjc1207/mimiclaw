@@ -4,6 +4,7 @@
 #include "esp_timer.h"
 #include "driver/gpio.h" 
 #include "display/display.h"
+#include "ui/config_screen.h"
 
 void  ESP32_Button_init(void){
   gpio_reset_pin(Button_PIN1);                        
@@ -31,7 +32,11 @@ void Button_SINGLE_CLICK_Callback(void* btn){
   struct Button *user_button = (struct Button *)btn;      
   if(user_button == &BUTTON1){                      
     BOOT_KEY_State = SINGLE_CLICK;                    
-    display_cycle_backlight();
+    if (config_screen_is_active()) {
+      config_screen_scroll_down();
+    } else {
+      display_cycle_backlight();
+    }
   }
 }
 void Button_DOUBLE_CLICK_Callback(void* btn){              

@@ -6,6 +6,10 @@ idf_component_register(
         "rgb/rgb.c"
         "buttons/multi_button.c"
         "buttons/button_driver.c"
+        "imu/I2C_Driver.c"
+        "imu/QMI8658.c"
+        "imu/imu_manager.c"
+        "ui/config_screen.c"
         "bus/message_bus.c"
         "wifi/wifi_manager.c"
         "telegram/telegram_bot.c"
@@ -29,5 +33,5 @@ idf_component_register(
     REQUIRES
         nvs_flash esp_wifi esp_netif esp_http_client esp_http_server
         esp_https_ota esp_event json spiffs console vfs app_update esp-tls
-        driver esp_lcd esp_timer led_strip
+        driver esp_lcd esp_timer led_strip qrcode
 )
