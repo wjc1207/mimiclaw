@@ -156,6 +156,36 @@ static void format_results(cJSON *root, char *output, size_t output_size)
     }
 }
 
+static void format_tavily_results(cJSON *root, char *output, size_t output_size)
+{
+    cJSON *results = cJSON_GetObjectItem(root, "results");
+    if (!results || !cJSON_IsArray(results) || cJSON_GetArraySize(results) == 0) {
+        snprintf(output, output_size, "No web results found.");
+        return;
+    }
+
+    size_t off = 0;
+    int idx = 0;
+    cJSON *item;
+    cJSON_ArrayForEach(item, results) {
+        if (idx >= SEARCH_RESULT_COUNT) break;
+
+        cJSON *title = cJSON_GetObjectItem(item, "title");
+        cJSON *url = cJSON_GetObjectItem(item, "url");
+        cJSON *content = cJSON_GetObjectItem(item, "content");
+
+        off += snprintf(output + off, output_size - off,
+            "%d. %s\n   %s\n   %s\n\n",
+            idx + 1,
+            (title && cJSON_IsString(title)) ? title->valuestring : "(no title)",
+            (url && cJSON_IsString(url)) ? url->valuestring : "",
+            (content && cJSON_IsString(content)) ? content->valuestring : "");
+
+        if (off >= output_size - 1) break;
+        idx++;
+    }
+}
+
 /* ── Direct HTTPS request ─────────────────────────────────────── */
 
 static esp_err_t brave_search_direct(const char *url, search_buf_t *sb)
