@@ -195,6 +195,8 @@ static int cmd_heap_info(int argc, char **argv)
 {
     printf("Internal free: %d bytes\n",
            (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    printf("PSRAM free:    %d bytes\n",
+           (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     printf("Total free:    %d bytes\n",
            (int)esp_get_free_heap_size());
     return 0;

@@ -99,7 +99,6 @@ void app_main(void)
 {
     /* Silence noisy components */
     esp_log_level_set("esp-x509-crt-bundle", ESP_LOG_WARN);
-    esp_log_level_set("QRCODE", ESP_LOG_WARN);
 
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "  MimiClaw - ESP32-S3 AI Agent");
@@ -108,6 +107,8 @@ void app_main(void)
     /* Print memory info */
     ESP_LOGI(TAG, "Internal free: %d bytes",
              (int)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    ESP_LOGI(TAG, "PSRAM free:    %d bytes",
+             (int)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     /* Input */
     button_Init();
