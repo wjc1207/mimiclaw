@@ -158,7 +158,7 @@ idf.py -p PORT flash monitor
 >
 > </details>
 
-### CLI Commands
+### CLI Commands (via UART/COM port)
 
 Connect via serial to configure or debug. **Config commands** let you change settings without recompiling — just plug in a USB cable anywhere.
 
