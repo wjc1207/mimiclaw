@@ -66,7 +66,7 @@ static const char *TAG = "skills";
     "## How to use\n" \
     "1. Identify the search keywords from the user's query\n" \
     "2. Build the ArXiv API query URL:\n" \
-    "   - Base URL: `http://export.arxiv.org/api/query`\n" \
+    "   - Base URL: `https://export.arxiv.org/api/query`\n" \
     "   - Add `search_query=` with keywords joined by `+AND+` (URL-encoded spaces as `+`)\n" \
     "   - Use field prefixes: `all:` (any field), `ti:` (title), `au:` (author), `abs:` (abstract), `cat:` (category)\n" \
     "   - Add `&start=0&max_results=5` to limit results\n" \
@@ -82,11 +82,11 @@ static const char *TAG = "skills";
     "\n" \
     "## Example\n" \
     "User: \"Find recent papers on large language models\"\n" \
-    "→ http_request url=\"http://export.arxiv.org/api/query?search_query=all:large+AND+all:language+AND+all:models&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending\" method=\"GET\"\n" \
+    "→ http_request url=\"https://export.arxiv.org/api/query?search_query=all:large+AND+all:language+AND+all:models&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending\" method=\"GET\"\n" \
     "→ Parse the XML response and list papers with title, authors, date, and link\n" \
     "\n" \
     "User: \"Search ArXiv for papers by Yann LeCun on deep learning\"\n" \
-    "→ http_request url=\"http://export.arxiv.org/api/query?search_query=au:LeCun+AND+all:deep+learning&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending\" method=\"GET\"\n"
+    "→ http_request url=\"https://export.arxiv.org/api/query?search_query=au:LeCun+AND+all:deep+learning&start=0&max_results=5&sortBy=submittedDate&sortOrder=descending\" method=\"GET\"\n"
 
 #define BUILTIN_SKILL_CREATOR \
     "# Skill Creator\n" \

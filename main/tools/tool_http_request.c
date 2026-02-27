@@ -28,7 +28,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     http_buf_t *hb = (http_buf_t *)evt->user_data;
     if (evt->event_id == HTTP_EVENT_ON_DATA) {
         size_t needed = hb->len + evt->data_len;
-        if (needed < hb->cap) {
+        if (needed + 1 < hb->cap) {
             memcpy(hb->data + hb->len, evt->data, evt->data_len);
             hb->len += evt->data_len;
             hb->data[hb->len] = '\0';
