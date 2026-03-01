@@ -56,8 +56,11 @@ static bool parse_and_set_time(const char *date_str, char *out, size_t out_size)
     /* Format in local time */
     struct tm local;
     localtime_r(&t, &local);
-    strftime(out, out_size, "%Y-%m-%d %H:%M:%S %Z (%A)", &local);
-
+    /* {"time": "2026-03-01 16:50:34 CST (Sunday)","epoch": 1772355034} */
+    char time_str[128];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z (%A)", &local);
+    snprintf(out, out_size, "{\"time\":\"%s\",\"epoch\":%ld}", time_str, (long)t);
+    
     return true;
 }
 
