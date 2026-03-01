@@ -4,6 +4,9 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
@@ -14,6 +17,66 @@ static const char *TAG = "http_request";
 
 #define HTTP_BUF_SIZE       (16 * 1024)
 #define HTTP_TIMEOUT_MS     15000
+
+/* ── Blocked domains ──────────────────────────────────────────── */
+
+static const char *blocked_domains[] = {
+    "metadata.google.internal",
+    "169.254.169.254",
+    "metadata.internal",
+    "kubernetes.default.svc",
+    "100.100.100.200",
+    NULL
+};
+
+/* ── IP-based blocking (host-byte-order) ──────────────────────── */
+
+static bool isAlwaysBlocked(uint32_t ip_hbo)
+{
+    uint8_t a = ip_hbo >> 24;
+    uint8_t b = (ip_hbo >> 16) & 0xFF;
+
+    if (a == 127)              return true; /* loopback */
+    if (a == 169 && b == 254)  return true; /* link-local / cloud metadata */
+    if (a == 100 && (b >= 64 && b <= 127)) return true; /* CGN 100.64.0.0/10 */
+    if (a == 0)                return true; /* 0.0.0.0/8 */
+    if (a >= 224)              return true; /* multicast + reserved */
+    /* NOT blocking 10.x, 172.16.x, 192.168.x — LAN is intentional */
+    return false;
+}
+
+/* ── Check domain against blocklist and resolved IP ───────────── */
+
+static bool is_blocked_destination(const char *host)
+{
+    /* Check domain blocklist */
+    for (int i = 0; blocked_domains[i] != NULL; i++) {
+        if (strcasecmp(host, blocked_domains[i]) == 0) {
+            return true;
+        }
+    }
+
+    /* Resolve hostname and check IP */
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo *res = NULL;
+    if (getaddrinfo(host, NULL, &hints, &res) == 0 && res) {
+        bool blocked = false;
+        if (res->ai_family == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)res->ai_addr;
+            uint32_t ip_hbo = ntohl(addr->sin_addr.s_addr);
+            blocked = isAlwaysBlocked(ip_hbo);
+        }
+        freeaddrinfo(res);
+        if (blocked) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 /* ── Response accumulator ─────────────────────────────────────── */
 
@@ -282,6 +345,29 @@ esp_err_t tool_http_request_execute(const char *input_json, char *output, size_t
         cJSON_Delete(input);
         snprintf(output, output_size, "Error: URL must start with http:// or https://");
         return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Extract host and check against blocklist / blocked IPs */
+    {
+        const char *scheme_end = strstr(url, "://");
+        const char *host_start = scheme_end + 3;
+        const char *host_end = host_start;
+        while (*host_end && *host_end != '/' && *host_end != ':' && *host_end != '?') {
+            host_end++;
+        }
+        size_t hlen = host_end - host_start;
+        char host_buf[256];
+        if (hlen > 0 && hlen < sizeof(host_buf)) {
+            memcpy(host_buf, host_start, hlen);
+            host_buf[hlen] = '\0';
+            if (is_blocked_destination(host_buf)) {
+                ESP_LOGW(TAG, "Blocked request to %s", host_buf);
+                cJSON_Delete(input);
+                snprintf(output, output_size,
+                    "Error: Access to '%s' is blocked for security reasons", host_buf);
+                return ESP_ERR_INVALID_ARG;
+            }
+        }
     }
 
     /* Method (default: GET) */
